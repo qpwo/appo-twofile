@@ -108,6 +108,12 @@ async function runApplication() {
     server.post('/api/log', (req, rep) => {
         if (__DEV__ && req.body && typeof req.body === 'object' && 'args' in req.body && Array.isArray(req.body.args)) {
             console.log('[CLIENT]', ...req.body.args);
+            try {
+                if (req.body.args.some((x: unknown) => String(x) === 'FINISHO')) {
+                    const pid = Number(fs.readFileSync('chrome.pid', 'utf-8'));
+                    if (pid) { try { process.kill(pid, 'SIGTERM'); } catch (_) {} }
+                }
+            } catch (_) {}
         }
         rep.status(204).send();
     });
@@ -126,6 +132,7 @@ async function runApplication() {
     await server.listen({ port: 3000 });
     fs.writeFileSync('server.pid', String(process.pid));
     console.log('--> Server running at http://localhost:3000');
+    return server;
 }
 
 
@@ -188,39 +195,25 @@ if (IS_SERVER) {
             console.log("--> BROWSER RUN");
             const chromePath = '/home/ubuntu/Downloads/chrome-linux64/chrome';
             if (!fs.existsSync(chromePath)) { console.warn("  - Chrome not found, skipping browser test."); return; }
-            // remove --dump-dom so it runs interactively. reduced timeout to 10s as per rules.
-            // add --remote-debugging-port=9222 to prevent chrome from exiting immediately after load
+
+            // start server in-process
+            const server = await runApplication();
+
+            // run browser self-test
             const chromeArgs = ['--headless', '--disable-gpu', '--no-sandbox', '--remote-debugging-port=9222', 'http://localhost:3000/?selftest=1'];
-            console.log(`  - Running: timeout 10 ${chromePath} ${chromeArgs.join(' ')}`);
-            await run('timeout', ['10', chromePath, ...chromeArgs]);
+            console.log(`  - Running: ${chromePath} ${chromeArgs.join(' ')}`);
+            const chromeProc = spawn(chromePath, chromeArgs, { stdio: 'ignore' });
+            if (chromeProc.pid) fs.writeFileSync('chrome.pid', String(chromeProc.pid));
+            await new Promise<void>(resolve => chromeProc.on('exit', () => resolve()));
+
+            await server.close();
         };
         const help = () => console.log(`Usage: ./${self} [help|clean|install|tsc|serve|browserrun|full]`);
 
-        /** delicate logic! dont mess with it! */
-        const almostExecve = (file: string, args: string[], env: NodeJS.ProcessEnv) => {
-            const child = spawn(file, args, { env, stdio: 'inherit' });
-            child.on('error', (err: Error) => {
-                let code = 1;
-                const e = err as NodeJS.ErrnoException;
-                if (e.code === 'ENOENT') code = 127; else if (e.code === 'EACCES') code = 126;
-                console.error(`${file}: ${err.message}`);
-                process.exit(code);
-            });
-            const signals = ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT'] as const;
-            const forward = (sig: NodeJS.Signals) => { if (!child.killed) { try { child.kill(sig); } catch (_) {} } };
-            signals.forEach((sig) => process.on(sig, forward));
-            child.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
-                signals.forEach((sig) => process.removeListener(sig, forward));
-                if (signal) { try { process.kill(process.pid, signal); } catch (_) { process.exit(128); } }
-                else { process.exit(code ?? 0); }
-            });
-        };
-
         const cmd = process.argv[2];
-        const forkAndServe = () => almostExecve('/home/ubuntu/.local/share/pnpm/pnpm', ['dlx', 'tsx', self, 'serve'], process.env);
 
         try {
-            if (!cmd) { clean(); await install(); await tsc(); forkAndServe(); }
+            if (!cmd) { clean(); await install(); await tsc(); await serve(); }
             else if (cmd === 'help') { help(); }
             else if (cmd === 'clean') { clean(); }
             else if (cmd === 'install') { await install(); }
@@ -229,16 +222,7 @@ if (IS_SERVER) {
             else if (cmd === 'browserrun') { await browserrun(); }
             else if (cmd === 'full') {
                 clean(); await install(); await tsc();
-                const serverProcess = spawn('pnpm', ['dlx', 'tsx', self, 'serve'], { stdio: 'pipe', detached: true });
-                let serverReady = false;
-                serverProcess.stdout?.on('data', (data: string | Buffer) => {
-                    const line = data.toString(); console.log(`[SERVER] ${line.trim()}`);
-                    if (line.includes('Server running')) { serverReady = true; }
-                });
-                for (let i=0; i<50 && !serverReady; i++) await new Promise(r=>setTimeout(r, 100));
-                if (!serverReady) throw new Error("Server failed to start in time for browser test.");
                 await browserrun();
-                if (serverProcess.pid) process.kill(serverProcess.pid, 'SIGTERM');
                 console.log("--> Full run complete.");
             }
             else { console.error(`Unknown command: ${cmd}`); help(); process.exit(1); }
@@ -302,7 +286,9 @@ if (IS_SERVER) {
                     assertText('h1', 'Todo List');
                     assert(!!qs('form'), 'Todo form missing');
                     console.log('[TEST] Todo page asserts OK.');
-                    await sleep(500); type('form input', 'Test a todo item'); click('form button');
+                    await sleep(500);
+                    const randomText = 'Test a todo item ' + Math.random();
+                    type('form input', randomText); click('form button');
                     await sleep(500);
                     assert(!!qs('ul li'), 'Todo item was not added to list');
                     console.log('[TEST] Added a todo OK.');
@@ -319,7 +305,9 @@ if (IS_SERVER) {
                     assert(!!qs('h1'), 'Movie title missing');
                     assert(document.body.textContent!.includes('Director:'), 'Director missing');
                     console.log('[TEST] Star Wars movie page asserts OK.');
-                    console.log('[TEST] Self-test complete.'); sessionStorage.removeItem('APPO_TEST_STEP');
+                    console.log('[TEST] Self-test complete.');
+                    console.log('FINISHO');
+                    sessionStorage.removeItem('APPO_TEST_STEP');
                 }
             };
             setTimeout(runTest, 50);

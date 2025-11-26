@@ -2,7 +2,7 @@ rule_1: The entire application must be contained within a single source file.
 rule_2: (without sysargs) The file must clean its own deps
 rule_3: (without sysargs) The file must reinstall its own deps (exit if fail)
 rule_4: (without sysargs) The file must typecheck itself (exit if fail)
-rule_5: Doing almostExecve (custom implementation) is preferred over having nasty stack of processes
+rule_5: Internal tasks must be run via async functions (e.g. await serve()) rather than spawning the script recursively, unless necessary.
 rule_6: The file must have (working) server-side-rendered jsx
 rule_7: The file must have (working) client-side-rendered jsx
 rule_8: The server-side and client-side jsx must share components without code duplication or having a giant string inside the source file
@@ -15,3 +15,4 @@ rule_14: the file must accept a single optional positional arg which is either '
 rule_15: if browserrun is sys arg then the client must click itself through the whole app and test all the routes. doing console.log and such. server should run like "timeout 10 /home/ubuntu/Downloads/chrome-linux64/chrome 'http://localhost:3000/todo?selftest=1'" or similar. the client should do a simple assert on each page and check every type of button and link. you might want a micro-assert library to make this simpler... make sure server timeout is longer than browser timeout.
 rule_16: if NODE_ENV !== 'production' then all console.log and console.error must be forwarded to server logs.
 rule_17: 'timout N ./server.tsx' must work. more specifically, the server must exit within 20 seconds after the timeout fires
+rule_18: when browser tests finish the browser must console.log FINISHO; when server sees FINISHO in logs it must kill the browser
