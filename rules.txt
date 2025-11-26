@@ -1,0 +1,12 @@
+rule_1: The entire application must be contained within a single source file.
+rule_2: The file must clean its own deps
+rule_3: The file must reinstall its own deps (exit if fail)
+rule_4: The file must typecheck itself (exit if fail)
+rule_5: Doing fork or spawn+exit is preferred over having nasty stack of processes
+rule_6: The file must have (working) server-side-rendered jsx
+rule_7: The file must have (working) client-side-rendered jsx
+rule_8: The server-side and client-side jsx must share components without code duplication or having a giant string inside the source file
+rule_9: The file must have useful (working) fastify api routes
+rule_10: The file must productively use an sqlite db
+rule_11: The entire script must be strictly typed. Using 'as any' or 'as unknown' is strictly forbidden. Any typecasts are frowned upon.
+rule_12: The client bundle must not have any server code
