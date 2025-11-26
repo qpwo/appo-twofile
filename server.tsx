@@ -12,12 +12,12 @@ if (!fs.existsSync(path.join(process.cwd(), 'node_modules', 'better-sqlite3'))) 
         name: "appo-runner",
         type: "module",
         pnpm: {
-            onlyBuiltDependencies: ["better-sqlite3"]
+            onlyBuiltDependencies: ["better-sqlite3", "esbuild"]
         }
     };
     fs.writeFileSync('package.json', JSON.stringify(packageJson, null, 2));
 
-    const deps = "react@18.3.1 react-dom@18.3.1 fastify@4.27.0 esbuild@0.21.4 node-fetch@3.3.2 better-sqlite3@12.4.6 @types/node@^20 @types/react@^18 @types/react-dom@^18 @types/better-sqlite3@^7";
+    const deps = "react@18.2.0 react-dom@18.2.0 fastify@4.25.2 esbuild@0.19.11 better-sqlite3@9.2.2 @types/node@20.19.6 @types/react@18.2.46 @types/react-dom@18.2.18 @types/better-sqlite3@7.6.8 typescript@5.3.3 tsx@4.7.0";
     execSync(`pnpm add ${deps}`, { stdio: 'inherit' });
 
     console.log('--> Dependencies installed. Restarting server...');
@@ -32,7 +32,6 @@ async function bootstrap() {
     const React = (await import('react')).default;
     const { renderToString } = await import('react-dom/server');
     const esbuild = (await import('esbuild')).default;
-    const fetch = (await import('node-fetch')).default;
     const Database = (await import('better-sqlite3')).default;
     const { Layout, WelcomePage, TodoPage, StarWarsIndexPage, StarWarsMoviePage } = await import('./app.js');
 
