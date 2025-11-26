@@ -5,24 +5,18 @@ export { }; // Treat as a module for TypeScript correctness.
 
 // This constant is the key to tree-shaking the server code out of the client bundle.
 const IS_SERVER = typeof window === 'undefined';
+// For rule 16: dev mode check. __build_env_dev__ is injected by esbuild.
+declare const __build_env_dev__: boolean;
+const __DEV__ = IS_SERVER ? process.env.NODE_ENV !== 'production' : __build_env_dev__;
 
-// --- SHARED TYPES & GLOBALS (visible to server, client, and tsc) ---
+// --- SHARED TYPES ---
 interface Todo { id: number; text: string; }
 interface MovieSummary { id: string; title: string; release_date: string; }
 interface MovieDetails { title: string; director: string; producer: string; release_date: string; }
 
-type AppData =
-    | { pageName: 'WelcomePage', props: {} }
-    | { pageName: 'TodoPage', props: { initialTodos: Todo[] } }
-    | { pageName: 'StarWarsIndexPage', props: { movies: MovieSummary[] } }
-    | { pageName: 'StarWarsMoviePage', props: { movie: MovieDetails } };
-
-// This MUST be at the top level.
-declare global { interface Window { __APP_DATA__: AppData; } }
-
 // --- SHARED CODE FACTORY (visible to server & client) ---
 function defineSharedCode(React: typeof import('react')) {
-    const { useState } = React;
+    const { useState, useEffect } = React;
     type PropsWithChildren<P> = React.PropsWithChildren<P>;
     const Link = ({ href, children, currentUrl }: PropsWithChildren<{ href: string; currentUrl: string }>) => {
         const style = href === currentUrl ? { backgroundColor: '#eee' } : {};
@@ -30,13 +24,13 @@ function defineSharedCode(React: typeof import('react')) {
     };
     const Layout = ({ children, currentUrl }: PropsWithChildren<{ currentUrl: string }>) => (
         <div style={{ display: 'flex', maxWidth: '960px', margin: 'auto' }}>
-            <div style={{ padding: '20px', borderRight: '1px solid #eee' }}>
+            <nav style={{ padding: '20px', borderRight: '1px solid #eee' }}>
                 <h2>appo-singlefile</h2>
                 <Link href="/" currentUrl={currentUrl}>Welcome</Link>
                 <Link href="/todo" currentUrl={currentUrl}>Todo</Link>
                 <Link href="/star-wars" currentUrl={currentUrl}>Star Wars</Link>
-            </div>
-            <div style={{ padding: '20px' }}>{children}</div>
+            </nav>
+            <main style={{ padding: '20px' }}>{children}</main>
         </div>
     );
     const Counter = () => {
@@ -44,8 +38,9 @@ function defineSharedCode(React: typeof import('react')) {
         return <button onClick={() => setCount(c => c + 1)}>Counter {count}</button>;
     };
     const WelcomePage = () => <><h1>Welcome</h1><p>Interactive counter:</p><Counter /></>;
-    const TodoPage = ({ initialTodos }: { initialTodos: Todo[] }) => {
-        const [todos, setTodos] = useState(initialTodos); const [text, setText] = useState('');
+    const TodoPage = () => {
+        const [todos, setTodos] = useState<Todo[]>([]); const [text, setText] = useState('');
+        useEffect(() => { fetch('/api/todos').then(res => res.json()).then(setTodos); }, []);
         const addTodo = async (e: React.FormEvent) => {
             e.preventDefault(); if (!text.trim()) return;
             const res = await fetch('/api/todos', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
@@ -53,24 +48,33 @@ function defineSharedCode(React: typeof import('react')) {
         };
         return <><h1>Todo List</h1><ul>{todos.map(t => <li key={t.id}>{t.text}</li>)}</ul><form onSubmit={addTodo}><input value={text} onChange={e => setText(e.target.value)} /><button>Add</button></form></>;
     };
-    const StarWarsIndexPage = ({ movies }: { movies: MovieSummary[] }) => <><h1>Star Wars</h1><ol>{movies.map(({ id, title }) => <li key={id}><a href={`/star-wars/${id}`}>{title}</a></li>)}</ol></>;
-    const StarWarsMoviePage = ({ movie }: { movie: MovieDetails }) => <><h1>{movie.title}</h1><p>Director: {movie.director}</p></>;
+    const StarWarsIndexPage = () => {
+        const [movies, setMovies] = useState<MovieSummary[]>([]);
+        useEffect(() => { fetch("https://brillout.github.io/star-wars/api/films.json").then(r => r.json()).then(setMovies); }, []);
+        return <><h1>Star Wars Films</h1><ol>{movies.map(({ id, title }) => <li key={id}><a href={`/star-wars/${id}`}>{title}</a></li>)}</ol></>;
+    };
+    const StarWarsMoviePage = () => {
+        const [movie, setMovie] = useState<MovieDetails | null>(null);
+        useEffect(() => {
+            const movieId = window.location.pathname.split('/').pop();
+            fetch(`https://brillout.github.io/star-wars/api/films/${movieId}.json`).then(r => r.json()).then(setMovie);
+        }, []);
+        if (!movie) return <h1>Loading movie...</h1>;
+        return <><h1>{movie.title}</h1><p>Director: {movie.director}</p><p>Producer: {movie.producer}</p><p>Released: {movie.release_date}</p></>;
+    };
 
     return { Layout, pages: { WelcomePage, TodoPage, StarWarsIndexPage, StarWarsMoviePage } };
 }
 
 // --- SERVER-ONLY APPLICATION LOGIC ---
-// This function is defined at the top level, but it is only ever called from within the
-// `if (IS_SERVER)` block, so it will be tree-shaken from the client bundle.
 async function runApplication() {
-    const rds = 'react-dom/server', ffy = 'fastify', esb = 'esbuild', b3 = 'better-sqlite3';
+    const rds = 'react-dom/server', ffy = 'fastify', esb = 'esbuild', b3 = 'better-sqlite3', fs_name = 'fs';
     const React = await import('react');
     const { renderToString } = await import(rds);
     const { default: esbuild } = await import(esb);
     const { default: DatabaseConstructor } = await import(b3);
-    type Fastify = typeof import('fastify').default;
-    type FastifyInstance = import('fastify').FastifyInstance;
-    const fastify = (await import(ffy)).default as Fastify;
+    const { default: fastify } = await import(ffy);
+    const fs = await import(fs_name);
     const { Layout, pages } = defineSharedCode(React);
 
     const db = new DatabaseConstructor('appo.db');
@@ -79,10 +83,20 @@ async function runApplication() {
     const getTodo = db.prepare('SELECT * FROM todos WHERE id = ?');
     const addTodo = db.prepare('INSERT INTO todos (text) VALUES (?)');
 
-    const server: FastifyInstance = fastify();
+    const server: import('fastify').FastifyInstance = fastify();
+
+    const gracefulShutdown = async (signal: string) => {
+        console.log(`\n--> Received ${signal}. Shutting down server gracefully...`);
+        await server.close();
+        console.log('  - Server closed.');
+        process.exit(0);
+    };
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
     const { outputFiles: [{ text: clientJs }] } = await esbuild.build({
         entryPoints: [process.argv[1]], bundle: true, write: false, format: 'iife',
-        define: { IS_SERVER: 'false' },
+        define: { IS_SERVER: 'false', '__build_env_dev__': String(process.env.NODE_ENV !== 'production') },
     });
 
     server.get('/client.js', (req, rep) => rep.header('Content-Type', 'application/javascript').send(clientJs));
@@ -91,39 +105,26 @@ async function runApplication() {
         const info = addTodo.run(req.body.text);
         rep.status(201).send(getTodo.get(Number(info.lastInsertRowid)));
     });
+    server.post('/api/log', (req, rep) => {
+        if (__DEV__ && req.body && typeof req.body === 'object' && 'args' in req.body && Array.isArray(req.body.args)) {
+            console.log('[CLIENT]', ...req.body.args);
+        }
+        rep.status(204).send();
+    });
 
-    const sendHtml = (rep: import('fastify').FastifyReply, appData: AppData, appHtml: string) => {
+    const sendHtml = (rep: import('fastify').FastifyReply, appHtml: string) => {
         const html = `<!DOCTYPE html><html><head><title>appo</title></head><body><div id="root">${appHtml}</div>
-        <script>window.__APP_DATA__=${JSON.stringify(appData)}</script><script src="/client.js"></script></body></html>`;
+        <script src="/client.js"></script></body></html>`;
         rep.header('Content-Type', 'text/html').send(html);
     };
 
-    server.get('/', (req, rep) => {
-        const appData: AppData = { pageName: 'WelcomePage', props: {} };
-        const appHtml = renderToString(<Layout currentUrl={req.url}><pages.WelcomePage {...appData.props} /></Layout>);
-        sendHtml(rep, appData, appHtml);
-    });
-    server.get('/todo', (req, rep) => {
-        const appData: AppData = { pageName: 'TodoPage', props: { initialTodos: allTodos.all() as Todo[] } };
-        const appHtml = renderToString(<Layout currentUrl={req.url}><pages.TodoPage {...appData.props} /></Layout>);
-        sendHtml(rep, appData, appHtml);
-    });
-    server.get('/star-wars', async (req, rep) => {
-        const res = await fetch("https://brillout.github.io/star-wars/api/films.json");
-        const movies = await res.json() as MovieSummary[];
-        const appData: AppData = { pageName: 'StarWarsIndexPage', props: { movies } };
-        const appHtml = renderToString(<Layout currentUrl={req.url}><pages.StarWarsIndexPage {...appData.props} /></Layout>);
-        sendHtml(rep, appData, appHtml);
-    });
-    server.get<{ Params: { id: string } }>('/star-wars/:id', async (req, rep) => {
-        const res = await fetch(`https://brillout.github.io/star-wars/api/films/${req.params.id}.json`);
-        const movie = await res.json() as MovieDetails;
-        const appData: AppData = { pageName: 'StarWarsMoviePage', props: { movie } };
-        const appHtml = renderToString(<Layout currentUrl={req.url}><pages.StarWarsMoviePage {...appData.props} /></Layout>);
-        sendHtml(rep, appData, appHtml);
-    });
+    server.get('/', (req, rep) => sendHtml(rep, renderToString(<Layout currentUrl={req.url.split('?')[0]}><pages.WelcomePage /></Layout>)));
+    server.get('/todo', (req, rep) => sendHtml(rep, renderToString(<Layout currentUrl={req.url.split('?')[0]}><pages.TodoPage /></Layout>)));
+    server.get('/star-wars', (req, rep) => sendHtml(rep, renderToString(<Layout currentUrl={req.url.split('?')[0]}><pages.StarWarsIndexPage /></Layout>)));
+    server.get<{ Params: { id: string } }>('/star-wars/:id', (req, rep) => sendHtml(rep, renderToString(<Layout currentUrl={req.url.split('?')[0]}><pages.StarWarsMoviePage /></Layout>)));
 
     await server.listen({ port: 3000 });
+    fs.writeFileSync('server.pid', String(process.pid));
     console.log('--> Server running at http://localhost:3000');
 }
 
@@ -131,57 +132,122 @@ async function runApplication() {
 // --- ENVIRONMENT-SPECIFIC ENTRYPOINTS ---
 if (IS_SERVER) {
     // --- SERVER-SIDE BOOTSTRAPPER ---
-    const bootstrap = async () => {
+    const main = async () => {
         const cp_name = 'child_process', fs_name = 'fs', path_name = 'path';
         const { spawn } = await import(cp_name);
         const fs = await import(fs_name);
         const path = await import(path_name);
-        const state = process.env.APPO_STATE;
-        const become = (nextState: string) => {
-            console.log(`  - Becoming STAGE ${nextState}...`);
-            const child = spawn('pnpm', ['dlx', 'tsx', path.basename(process.argv[1])], {
-                env: { ...process.env, APPO_STATE: nextState },
-                stdio: 'inherit', detached: true
+        const self = path.basename(process.argv[1]);
+
+        let childProcess: import('child_process').ChildProcess | null = null;
+        const cleanupAndExit = (signal: string) => {
+            console.log(`\n--> Bootstrap received ${signal}. Cleaning up...`);
+            const cp = childProcess;
+            if (cp && cp.pid) {
+                try { process.kill(-cp.pid, 'SIGTERM'); } catch (e) {}
+            }
+            process.exit(1);
+        };
+        process.on('SIGINT', () => cleanupAndExit('SIGINT'));
+        process.on('SIGTERM', () => cleanupAndExit('SIGTERM'));
+
+        const run = (cmd: string, args: string[]): Promise<number | null> => new Promise((resolve) => {
+            const cp = spawn(cmd, args, { stdio: 'inherit', detached: true });
+            childProcess = cp;
+            cp.on('close', (code: number | null) => { childProcess = null; resolve(code); });
+        });
+
+        const clean = () => {
+            console.log('--> CLEAN');
+            if (fs.existsSync('server.pid')) {
+                try {
+                    const pid = parseInt(fs.readFileSync('server.pid', 'utf-8'), 10);
+                    console.log(`  - Killing old server process (PID: ${pid})...`);
+                    try { process.kill(pid, 'SIGTERM'); } catch (e: any) { if (e.code !== 'ESRCH') throw e; }
+                } catch (e) { console.warn(`  - Could not kill old server process:`, e); }
+            }
+            // note! not deleting db!
+            ['node_modules', '.pnpm-store', 'package.json', 'pnpm-lock.yaml', 'server.pid'].forEach(item => {
+                if (fs.existsSync(item)) fs.rmSync(item, { recursive: true, force: true });
             });
-            child.unref();
-            process.exit();
+        };
+        const install = async () => {
+            console.log('--> INSTALL');
+            fs.writeFileSync('package.json', JSON.stringify({ name: "appo-runner", type: "module", pnpm: { onlyBuiltDependencies: ["better-sqlite3"] } }, null, 2));
+            const deps = "react@18.2.0 react-dom@18.2.0 fastify@4.25.2 esbuild@0.20.2 better-sqlite3@9.4.3 @types/node@20 @types/react @types/react-dom @types/better-sqlite3 typescript@5.3.3 tsx@4.7.0";
+            if (await run('pnpm', ['add', ...deps.split(' ')]) !== 0) throw new Error(`pnpm add failed`);
+        };
+        const tsc = async () => {
+            console.log('--> TYPE-CHECK');
+            const args = ['--noEmit', '--strict', '--jsx', 'react-jsx', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '--lib', 'DOM,ESNext', '--esModuleInterop', self];
+            if (await run('pnpm', ['exec', 'tsc', ...args]) !== 0) throw new Error(`tsc failed`);
+            console.log('  - Type-check passed.');
+        };
+        const serve = () => runApplication();
+        const browserrun = async () => {
+            console.log("--> BROWSER RUN");
+            const chromePath = '/home/ubuntu/Downloads/chrome-linux64/chrome';
+            if (!fs.existsSync(chromePath)) { console.warn("  - Chrome not found, skipping browser test."); return; }
+            // remove --dump-dom so it runs interactively. reduced timeout to 10s as per rules.
+            // add --remote-debugging-port=9222 to prevent chrome from exiting immediately after load
+            const chromeArgs = ['--headless', '--disable-gpu', '--no-sandbox', '--remote-debugging-port=9222', 'http://localhost:3000/?selftest=1'];
+            console.log(`  - Running: timeout 10 ${chromePath} ${chromeArgs.join(' ')}`);
+            await run('timeout', ['10', chromePath, ...chromeArgs]);
+        };
+        const help = () => console.log(`Usage: ./${self} [help|clean|install|tsc|serve|browserrun|full]`);
+
+        /** delicate logic! dont mess with it! */
+        const almostExecve = (file: string, args: string[], env: NodeJS.ProcessEnv) => {
+            const child = spawn(file, args, { env, stdio: 'inherit' });
+            child.on('error', (err: Error) => {
+                let code = 1;
+                const e = err as NodeJS.ErrnoException;
+                if (e.code === 'ENOENT') code = 127; else if (e.code === 'EACCES') code = 126;
+                console.error(`${file}: ${err.message}`);
+                process.exit(code);
+            });
+            const signals = ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT'] as const;
+            const forward = (sig: NodeJS.Signals) => { if (!child.killed) { try { child.kill(sig); } catch (_) {} } };
+            signals.forEach((sig) => process.on(sig, forward));
+            child.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+                signals.forEach((sig) => process.removeListener(sig, forward));
+                if (signal) { try { process.kill(process.pid, signal); } catch (_) { process.exit(128); } }
+                else { process.exit(code ?? 0); }
+            });
         };
 
+        const cmd = process.argv[2];
+        const forkAndServe = () => almostExecve('/home/ubuntu/.local/share/pnpm/pnpm', ['dlx', 'tsx', self, 'serve'], process.env);
+
         try {
-            if (!state) {
-                console.log('--> STAGE 0: CLEANUP');
-                ['node_modules', 'package.json', 'pnpm-lock.yaml', 'appo.db'].forEach(item => {
-                    if (fs.existsSync(item)) fs.rmSync(item, { recursive: true, force: true });
+            if (!cmd) { clean(); await install(); await tsc(); forkAndServe(); }
+            else if (cmd === 'help') { help(); }
+            else if (cmd === 'clean') { clean(); }
+            else if (cmd === 'install') { await install(); }
+            else if (cmd === 'tsc') { await tsc(); }
+            else if (cmd === 'serve') { await serve(); }
+            else if (cmd === 'browserrun') { await browserrun(); }
+            else if (cmd === 'full') {
+                clean(); await install(); await tsc();
+                const serverProcess = spawn('pnpm', ['dlx', 'tsx', self, 'serve'], { stdio: 'pipe', detached: true });
+                let serverReady = false;
+                serverProcess.stdout?.on('data', (data: string | Buffer) => {
+                    const line = data.toString(); console.log(`[SERVER] ${line.trim()}`);
+                    if (line.includes('Server running')) { serverReady = true; }
                 });
-                become('1');
-            } else if (state === '1') {
-                console.log('--> STAGE 1: INSTALL');
-                fs.writeFileSync('package.json', JSON.stringify({ name: "appo-runner", type: "module", pnpm: { onlyBuiltDependencies: ["better-sqlite3"] }}, null, 2));
-                const deps = "react@18.2.0 react-dom@18.2.0 fastify@4.25.2 esbuild@0.20.2 better-sqlite3@9.4.3 @types/node @types/react @types/react-dom @types/better-sqlite3 typescript@5.3.3 tsx@4.7.0";
-                const pnpm = spawn('pnpm', ['add', ...deps.split(' ')], { stdio: 'inherit' });
-                pnpm.on('close', (code: number | null) => {
-                    if (code !== 0) throw new Error(`pnpm add failed with code ${code}`);
-                    become('2');
-                });
-            } else if (state === '2') {
-                console.log('--> STAGE 2: TYPE-CHECK');
-                const tsc_args = ['--noEmit', '--strict', '--jsx', 'react-jsx', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '--lib', 'DOM,ESNext', '--esModuleInterop', path.basename(process.argv[1])].join(' ');
-                const tsc = spawn('pnpm', ['exec', 'tsc', ...tsc_args.split(' ')], { stdio: 'inherit' });
-                tsc.on('close', (code: number | null) => {
-                    if (code !== 0) throw new Error(`tsc failed with code ${code}`);
-                    console.log('  - Type-check passed.');
-                    become('3');
-                });
-            } else if (state === '3') {
-                console.log('--> STAGE 3: RUN');
-                await runApplication();
+                for (let i=0; i<50 && !serverReady; i++) await new Promise(r=>setTimeout(r, 100));
+                if (!serverReady) throw new Error("Server failed to start in time for browser test.");
+                await browserrun();
+                if (serverProcess.pid) process.kill(serverProcess.pid, 'SIGTERM');
+                console.log("--> Full run complete.");
             }
+            else { console.error(`Unknown command: ${cmd}`); help(); process.exit(1); }
         } catch (error) {
-            console.error(`\n!!! STAGE '${state || '0'}' FAILED !!!\n`, error);
+            console.error(`\n!!! COMMAND '${cmd || 'default'}' FAILED !!!\n`, error);
             process.exit(1);
         }
     };
-    bootstrap();
+    main();
 
 } else {
     // --- CLIENT-SIDE ENTRYPOINT ---
@@ -189,17 +255,87 @@ if (IS_SERVER) {
         const React = await import('react');
         const { hydrateRoot } = await import('react-dom/client');
         const { Layout, pages } = defineSharedCode(React);
+
+        if (__DEV__) {
+            const originalConsoleLog = console.log;
+            const originalConsoleError = console.error;
+            const logToServer = (level: 'log' | 'error', args: any[]) => {
+                fetch('/api/log', {
+                    method: 'POST', body: JSON.stringify({ level, args: args.map(arg => String(arg)) }),
+                    headers: { 'Content-Type': 'application/json' },
+                    keepalive: true,
+                }).catch(() => { });
+            };
+            console.log = (...args: any[]) => { originalConsoleLog.apply(console, args); logToServer('log', args); };
+            console.error = (...args: any[]) => { originalConsoleError.apply(console, args); logToServer('error', args); };
+        }
+
+        const runTestIfRequested = () => {
+             const isTestRun = sessionStorage.getItem('APPO_TEST_STEP') || new URLSearchParams(window.location.search).get('selftest') === '1';
+             if (!isTestRun) return;
+
+            const runTest = async () => {
+                const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+                const assert = (cond: boolean, msg: string) => { if(!cond) { console.error(`[TEST FAIL] ${msg}`); throw new Error(msg); } };
+                const qs = (sel: string) => document.querySelector(sel);
+                const assertText = (sel: string, text: string) => { const el = qs(sel); assert(!!el, `Element not found: ${sel}`); assert(el!.textContent === text, `Expected text '${text}' in ${sel}, got '${el!.textContent}'`); };
+                const click = (sel: string) => { const el = qs(sel) as HTMLElement; assert(!!el, `Click target not found: ${sel}`); el.click(); };
+                const type = (sel: string, text: string) => {
+                    const el = qs(sel) as HTMLInputElement; assert(!!el, `Input not found: ${sel}`);
+                    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                    setter?.call(el, text);
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                };
+                const step = sessionStorage.getItem('APPO_TEST_STEP') || '0';
+                console.log(`[TEST] Running step ${step} on ${window.location.pathname}`);
+                await sleep(500);
+
+                if (window.location.pathname === '/') {
+                    assertText('h1', 'Welcome');
+                    assert(!!qs('button'), 'Counter button missing');
+                    click('button');
+                    await sleep(100);
+                    assertText('button', 'Counter 1');
+                    console.log('[TEST] Welcome page asserts OK.');
+                    sessionStorage.setItem('APPO_TEST_STEP', '1'); click('a[href="/todo"]');
+                } else if (window.location.pathname === '/todo') {
+                    assertText('h1', 'Todo List');
+                    assert(!!qs('form'), 'Todo form missing');
+                    console.log('[TEST] Todo page asserts OK.');
+                    await sleep(500); type('form input', 'Test a todo item'); click('form button');
+                    await sleep(500);
+                    assert(!!qs('ul li'), 'Todo item was not added to list');
+                    console.log('[TEST] Added a todo OK.');
+                    sessionStorage.setItem('APPO_TEST_STEP', '2'); click('a[href="/star-wars"]');
+                } else if (window.location.pathname === '/star-wars') {
+                    assertText('h1', 'Star Wars Films');
+                    console.log('[TEST] Star Wars index asserts OK.');
+                    await sleep(1000);
+                    assert(!!qs('ol li'), 'Movie list empty');
+                    console.log('[TEST] Movie list loaded OK.');
+                    sessionStorage.setItem('APPO_TEST_STEP', '3'); click('ol li:first-child a');
+                } else if (window.location.pathname.startsWith('/star-wars/')) {
+                    await sleep(1000);
+                    assert(!!qs('h1'), 'Movie title missing');
+                    assert(document.body.textContent!.includes('Director:'), 'Director missing');
+                    console.log('[TEST] Star Wars movie page asserts OK.');
+                    console.log('[TEST] Self-test complete.'); sessionStorage.removeItem('APPO_TEST_STEP');
+                }
+            };
+            setTimeout(runTest, 50);
+        };
+        runTestIfRequested();
+
+        let pageElement: React.ReactElement | null = null;
+        const { pathname } = window.location;
+        if (pathname === '/') pageElement = <pages.WelcomePage />;
+        else if (pathname === '/todo') pageElement = <pages.TodoPage />;
+        else if (pathname === '/star-wars') pageElement = <pages.StarWarsIndexPage />;
+        else if (pathname.startsWith('/star-wars/')) pageElement = <pages.StarWarsMoviePage />;
+
         const root = document.getElementById('root');
-        const { pageName, props } = window.__APP_DATA__;
-        if (root) {
-            let pageElement: React.ReactElement | null = null;
-            switch (pageName) {
-                case 'WelcomePage': pageElement = <pages.WelcomePage {...props} />; break;
-                case 'TodoPage': pageElement = <pages.TodoPage {...props} />; break;
-                case 'StarWarsIndexPage': pageElement = <pages.StarWarsIndexPage {...props} />; break;
-                case 'StarWarsMoviePage': pageElement = <pages.StarWarsMoviePage {...props} />; break;
-            }
-            if (pageElement) hydrateRoot(root, <Layout currentUrl={window.location.pathname}>{pageElement}</Layout>);
+        if (root && pageElement) {
+            hydrateRoot(root, <Layout currentUrl={pathname}>{pageElement}</Layout>);
         }
     };
     runClient();
