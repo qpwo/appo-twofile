@@ -1,0 +1,12 @@
+style_1: always prefer 'function foo() {}' to 'const foo = () => {}'
+style_2: a single expression ()=>... is ok but if its more than one line, then name it. named func inside map or filter is ok, dont be scared.
+style_3: double newline between funcs
+style_4: most important func closer to top. helper funcs after. newspaper principle.
+style_5: whenever possible, try to avoid indent. always prefer module-scope when possible. or outermost scope you can afford.
+style_6: avoid try-catch as much as humanly possible. try-finally is fine. try-catch is the devil.
+style_7: each line should have exactly 0 statements or 1 statement. never 2 statements. many expressions on one line is fine obviously.
+style_8: each type of div should have a short unique id. divs in a list should be named like PARENT_IDX eg todo_4. this makes writing and running tests very easy. take care to make sure these short ids are unique.
+style_9: 2-space indent
+style_10: never use extraneous parens or extraneous brackets
+style_11: never use parens around jsx unless absolutely necessary
+style_12: do all dynamic imports at the top of a section instead of having ugly inline 'foo: import('Bar').Bar = Bar' or whatever
