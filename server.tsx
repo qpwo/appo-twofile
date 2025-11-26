@@ -162,6 +162,15 @@ function defineSharedCode(React: typeof import('react')) {
 // --- SERVER-ONLY APPLICATION LOGIC ---
 
 async function runApplication() {
+  type ReactDomServer = typeof import('react-dom/server');
+  type Esbuild = typeof import('esbuild');
+  type BetterSqlite3 = typeof import('better-sqlite3');
+  type Fastify = typeof import('fastify');
+  type Fs = typeof import('fs');
+  type RouteGenericInterface = import('fastify').RouteGenericInterface;
+  type FastifyRequest<T extends RouteGenericInterface = RouteGenericInterface> = import('fastify').FastifyRequest<T>;
+  type FastifyReply = import('fastify').FastifyReply;
+
   const s_module = 'module';
   const mod = await import(s_module) as { createRequire: (url: string) => NodeRequire };
   const require = mod.createRequire(import.meta.url);
@@ -174,11 +183,11 @@ async function runApplication() {
   const s_fs = 'fs';
 
   const React = await import(s_react);
-  const { renderToString }: typeof import('react-dom/server') = require(s_rds);
-  const esbuild: typeof import('esbuild') = require(s_esb);
-  const DatabaseConstructor: typeof import('better-sqlite3') = require(s_b3);
-  const fastify: typeof import('fastify') = require(s_ffy);
-  const fs: typeof import('fs') = require(s_fs);
+  const { renderToString }: ReactDomServer = require(s_rds);
+  const esbuild: Esbuild = require(s_esb);
+  const DatabaseConstructor: BetterSqlite3 = require(s_b3);
+  const fastify: Fastify = require(s_ffy);
+  const fs: Fs = require(s_fs);
 
   const { Layout, pages } = defineSharedCode(React);
 
@@ -213,19 +222,19 @@ async function runApplication() {
   const clientJs = clientBuild.outputFiles[0].text;
 
 
-  function handleClientJs(req: unknown, rep: import('fastify').FastifyReply) {
+  function handleClientJs(req: unknown, rep: FastifyReply) {
     rep.header('Content-Type', 'application/javascript').send(clientJs);
   }
   server.get('/client.js', handleClientJs);
 
 
-  function handleGetTodos(req: unknown, rep: import('fastify').FastifyReply) {
+  function handleGetTodos(req: unknown, rep: FastifyReply) {
     rep.send(stmtAllTodos.all());
   }
   server.get('/api/todos', handleGetTodos);
 
 
-  function handleAddTodo(req: import('fastify').FastifyRequest<{ Body: { text: string } }>, rep: import('fastify').FastifyReply) {
+  function handleAddTodo(req: FastifyRequest<{ Body: { text: string } }>, rep: FastifyReply) {
     const info = stmtAddTodo.run(req.body.text);
     const newTodo = stmtGetTodo.get(Number(info.lastInsertRowid));
     rep.status(201).send(newTodo);
@@ -233,13 +242,14 @@ async function runApplication() {
   server.post<{ Body: { text: string } }>('/api/todos', handleAddTodo);
 
 
-  function handleClientLog(req: import('fastify').FastifyRequest, rep: import('fastify').FastifyReply) {
+  function handleClientLog(req: FastifyRequest, rep: FastifyReply) {
     if (!__DEV__) return rep.status(204).send();
 
-    const body = req.body as any;
-    if (body && typeof body === 'object' && Array.isArray(body.args)) {
-      console.log('[CLIENT]', ...body.args);
-      checkFinisho(body.args);
+    const body = req.body;
+    const body_ = body as {args?: unknown | unknown[]}
+    if (Array.isArray(body_?.args)) {
+      console.log('[CLIENT]', ...body_.args);
+      checkFinisho(body_.args);
     }
     rep.status(204).send();
   }
@@ -265,7 +275,7 @@ async function runApplication() {
   }
 
 
-  function sendHtml(rep: import('fastify').FastifyReply, appHtml: string) {
+  function sendHtml(rep: FastifyReply, appHtml: string) {
     const html = `<!DOCTYPE html>
 <html>
   <head><title>appo</title></head>
@@ -278,7 +288,7 @@ async function runApplication() {
   }
 
 
-  function handleRoot(req: import('fastify').FastifyRequest, rep: import('fastify').FastifyReply) {
+  function handleRoot(req: FastifyRequest, rep: FastifyReply) {
     const currentUrl = req.url.split('?')[0];
     const content = renderToString(<Layout currentUrl={currentUrl}><pages.WelcomePage /></Layout>);
     sendHtml(rep, content);
@@ -286,7 +296,7 @@ async function runApplication() {
   server.get('/', handleRoot);
 
 
-  function handleTodoPage(req: import('fastify').FastifyRequest, rep: import('fastify').FastifyReply) {
+  function handleTodoPage(req: FastifyRequest, rep: FastifyReply) {
     const currentUrl = req.url.split('?')[0];
     const content = renderToString(<Layout currentUrl={currentUrl}><pages.TodoPage /></Layout>);
     sendHtml(rep, content);
@@ -294,7 +304,7 @@ async function runApplication() {
   server.get('/todo', handleTodoPage);
 
 
-  function handleStarWarsIndex(req: import('fastify').FastifyRequest, rep: import('fastify').FastifyReply) {
+  function handleStarWarsIndex(req: FastifyRequest, rep: FastifyReply) {
     const currentUrl = req.url.split('?')[0];
     const content = renderToString(<Layout currentUrl={currentUrl}><pages.StarWarsIndexPage /></Layout>);
     sendHtml(rep, content);
@@ -302,7 +312,7 @@ async function runApplication() {
   server.get('/star-wars', handleStarWarsIndex);
 
 
-  function handleStarWarsMovie(req: import('fastify').FastifyRequest, rep: import('fastify').FastifyReply) {
+  function handleStarWarsMovie(req: FastifyRequest, rep: FastifyReply) {
     const currentUrl = req.url.split('?')[0];
     const content = renderToString(<Layout currentUrl={currentUrl}><pages.StarWarsMoviePage /></Layout>);
     sendHtml(rep, content);
@@ -325,17 +335,22 @@ if (IS_SERVER) {
 }
 
 async function bootstrap() {
+  type ChildProcessModule = typeof import('child_process');
+  type FsModule = typeof import('fs');
+  type PathModule = typeof import('path');
+  type ChildProcess = import('child_process').ChildProcess;
+
   const s_cp = 'child_process';
   const s_fs = 'fs';
   const s_path = 'path';
 
-  const { spawn }: typeof import('child_process') = await import(s_cp);
-  const fs: typeof import('fs') = await import(s_fs);
-  const path: typeof import('path') = await import(s_path);
+  const { spawn }: ChildProcessModule = await import(s_cp);
+  const fs: FsModule = await import(s_fs);
+  const path: PathModule = await import(s_path);
 
   const selfVal = process.argv[1];
   const selfBase = path.basename(selfVal);
-  let childProcess: import('child_process').ChildProcess | null = null;
+  let childProcess: ChildProcess | null = null;
 
 
   function cleanupAndExit(signal: string) {
@@ -365,8 +380,9 @@ async function bootstrap() {
   function killPid(pid: number) {
     try {
       process.kill(pid, 'SIGTERM');
-    } catch (e: any) {
-      if (e.code !== 'ESRCH') throw e;
+    } catch (e) {
+      const err = e as {code?: string}
+      if (err?.code !== 'ESRCH') throw e;
     }
   }
 
@@ -489,6 +505,7 @@ if (!IS_SERVER) {
 
 async function runClient() {
   const React = await import('react');
+  type ReactElement = import('react').ReactElement;
   const { hydrateRoot } = await import('react-dom/client');
   const { Layout, pages } = defineSharedCode(React);
 
@@ -496,137 +513,10 @@ async function runClient() {
     setupDevLogging();
   }
 
-  function setupDevLogging() {
-    const originalConsoleLog = console.log;
-    const originalConsoleError = console.error;
-
-    function logToServer(level: 'log' | 'error', args: any[]) {
-      const body = JSON.stringify({ level, args: args.map(arg => String(arg)) });
-      fetch('/api/log', {
-        method: 'POST',
-        body,
-        headers: { 'Content-Type': 'application/json' },
-        keepalive: true,
-      }).catch(() => { });
-    }
-
-    console.log = function(...args: any[]) {
-      originalConsoleLog.apply(console, args);
-      logToServer('log', args);
-    };
-
-    console.error = function(...args: any[]) {
-      originalConsoleError.apply(console, args);
-      logToServer('error', args);
-    };
-  }
-
-
-  const runTestIfRequested = function() {
-    const searchParams = new URLSearchParams(window.location.search);
-    const isTestRun = sessionStorage.getItem('APPO_TEST_STEP') || searchParams.get('selftest') === '1';
-    if (!isTestRun) return;
-
-    const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
-
-    function assert(cond: boolean, msg: string) {
-      if (!cond) {
-        console.error(`[TEST FAIL] ${msg}`);
-        throw new Error(msg);
-      }
-    }
-
-    function qs(sel: string) {
-      const el = document.querySelector(sel);
-      return el;
-    }
-
-    function assertText(sel: string, text: string) {
-      const el = qs(sel);
-      assert(!!el, `Element not found: ${sel}`);
-      const content = el!.textContent || '';
-      assert(content === text, `Expected text '${text}' in ${sel}, got '${content}'`);
-    }
-
-    function click(sel: string) {
-      const el = qs(sel) as HTMLElement;
-      assert(!!el, `Click target not found: ${sel}`);
-      el.click();
-    }
-
-    function type(sel: string, text: string) {
-      const el = qs(sel) as HTMLInputElement;
-      assert(!!el, `Input not found: ${sel}`);
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
-      if (setter) setter.call(el, text);
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-
-    async function runTest() {
-      const step = sessionStorage.getItem('APPO_TEST_STEP') || '0';
-      const pathname = window.location.pathname;
-      console.log(`[TEST] Running step ${step} on ${pathname}`);
-      await sleep(500);
-
-      if (pathname === '/') {
-        assertText('h1', 'Welcome');
-        assert(!!qs('#counter_btn'), 'Counter button missing');
-        click('#counter_btn');
-        await sleep(100);
-        assertText('#counter_btn', 'Counter 1');
-        console.log('[TEST] Welcome page asserts OK.');
-
-        sessionStorage.setItem('APPO_TEST_STEP', '1');
-        click('#nav_link__todo');
-
-      } else if (pathname === '/todo') {
-        assertText('h1', 'Todo List');
-        assert(!!qs('#todo_form'), 'Todo form missing');
-        console.log('[TEST] Todo page asserts OK.');
-        await sleep(500);
-
-        const randomText = 'Test a todo item ' + Math.random();
-        type('#todo_input', randomText);
-        click('#todo_add_btn');
-        await sleep(500);
-
-        assert(!!qs('#todo_list li'), 'Todo item was not added to list');
-        console.log('[TEST] Added a todo OK.');
-
-        sessionStorage.setItem('APPO_TEST_STEP', '2');
-        click('#nav_link__star_wars');
-
-      } else if (pathname === '/star-wars') {
-        assertText('h1', 'Star Wars Films');
-        console.log('[TEST] Star Wars index asserts OK.');
-        await sleep(1000);
-
-        assert(!!qs('#movie_list li'), 'Movie list empty');
-        console.log('[TEST] Movie list loaded OK.');
-
-        sessionStorage.setItem('APPO_TEST_STEP', '3');
-        click('#movie_list li:first-child a');
-
-      } else if (pathname.startsWith('/star-wars/')) {
-        await sleep(1000);
-        assert(!!qs('#movie_title'), 'Movie title missing');
-        const dirText = qs('#movie_director')?.textContent || '';
-        assert(dirText.includes('Director:'), 'Director missing');
-
-        console.log('[TEST] Star Wars movie page asserts OK.');
-        console.log('[TEST] Self-test complete.');
-        console.log('FINISHO');
-        sessionStorage.removeItem('APPO_TEST_STEP');
-      }
-    }
-
-    setTimeout(runTest, 50);
-  };
-
   runTestIfRequested();
 
 
-  let pageElement: import('react').ReactElement | null = null;
+  let pageElement: ReactElement | null = null;
   const { pathname } = window.location;
 
   if (pathname === '/') {
@@ -644,4 +534,132 @@ async function runClient() {
     const content = <Layout currentUrl={pathname}>{pageElement}</Layout>;
     hydrateRoot(root, content);
   }
+}
+
+
+function setupDevLogging() {
+  const originalConsoleLog = console.log;
+  const originalConsoleError = console.error;
+
+  function logToServer(level: 'log' | 'error', args: unknown[]) {
+    const body = JSON.stringify({ level, args: args.map(arg => String(arg)) });
+    fetch('/api/log', {
+      method: 'POST',
+      body,
+      headers: { 'Content-Type': 'application/json' },
+      keepalive: true,
+    }).catch(() => { });
+  }
+
+  console.log = function(...args: unknown[]) {
+    originalConsoleLog.apply(console, args);
+    logToServer('log', args);
+  };
+
+  console.error = function(...args: unknown[]) {
+    originalConsoleError.apply(console, args);
+    logToServer('error', args);
+  };
+}
+
+
+function runTestIfRequested() {
+  const searchParams = new URLSearchParams(window.location.search);
+  const isTestRun = sessionStorage.getItem('APPO_TEST_STEP') || searchParams.get('selftest') === '1';
+  if (!isTestRun) return;
+
+  const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+
+  function assert(cond: boolean, msg: string) {
+    if (!cond) {
+      console.error(`[TEST FAIL] ${msg}`);
+      throw new Error(msg);
+    }
+  }
+
+  function qs(sel: string) {
+    const el = document.querySelector(sel);
+    return el;
+  }
+
+  function assertText(sel: string, text: string) {
+    const el = qs(sel);
+    assert(!!el, `Element not found: ${sel}`);
+    const content = el!.textContent || '';
+    assert(content === text, `Expected text '${text}' in ${sel}, got '${content}'`);
+  }
+
+  function click(sel: string) {
+    const el = qs(sel) as HTMLElement;
+    assert(!!el, `Click target not found: ${sel}`);
+    el.click();
+  }
+
+  function type(sel: string, text: string) {
+    const el = qs(sel) as HTMLInputElement;
+    assert(!!el, `Input not found: ${sel}`);
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    if (setter) setter.call(el, text);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  async function runTest() {
+    const step = sessionStorage.getItem('APPO_TEST_STEP') || '0';
+    const pathname = window.location.pathname;
+    console.log(`[TEST] Running step ${step} on ${pathname}`);
+    await sleep(500);
+
+    if (pathname === '/') {
+      assertText('h1', 'Welcome');
+      assert(!!qs('#counter_btn'), 'Counter button missing');
+      click('#counter_btn');
+      await sleep(100);
+      assertText('#counter_btn', 'Counter 1');
+      console.log('[TEST] Welcome page asserts OK.');
+
+      sessionStorage.setItem('APPO_TEST_STEP', '1');
+      click('#nav_link__todo');
+
+    } else if (pathname === '/todo') {
+      assertText('h1', 'Todo List');
+      assert(!!qs('#todo_form'), 'Todo form missing');
+      console.log('[TEST] Todo page asserts OK.');
+      await sleep(500);
+
+      const randomText = 'Test a todo item ' + Math.random();
+      type('#todo_input', randomText);
+      click('#todo_add_btn');
+      await sleep(500);
+
+      assert(!!qs('#todo_list li'), 'Todo item was not added to list');
+      console.log('[TEST] Added a todo OK.');
+
+      sessionStorage.setItem('APPO_TEST_STEP', '2');
+      click('#nav_link__star_wars');
+
+    } else if (pathname === '/star-wars') {
+      assertText('h1', 'Star Wars Films');
+      console.log('[TEST] Star Wars index asserts OK.');
+      await sleep(1000);
+
+      assert(!!qs('#movie_list li'), 'Movie list empty');
+      console.log('[TEST] Movie list loaded OK.');
+
+      sessionStorage.setItem('APPO_TEST_STEP', '3');
+      click('#movie_list li:first-child a');
+
+    } else if (pathname.startsWith('/star-wars/')) {
+      await sleep(1000);
+      assert(!!qs('#movie_title'), 'Movie title missing');
+      const dirText = qs('#movie_director')?.textContent || '';
+      assert(dirText.includes('Director:'), 'Director missing');
+
+      console.log('[TEST] Star Wars movie page asserts OK.');
+      console.log('[TEST] Self-test complete.');
+      console.log('FINISHO');
+      sessionStorage.removeItem('APPO_TEST_STEP');
+    }
+  }
+
+  setTimeout(runTest, 50);
 }
