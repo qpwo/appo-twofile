@@ -2,7 +2,7 @@
   "name": "appo-singlefile",
   "type": "module",
   "scripts": {
-    "start": "tsx app.tsx"
+    "start": "tsx server.tsx"
   },
   "dependencies": {
     "@types/node": "^20.14.2",
