@@ -1,0 +1,7 @@
+- have a FlickerDetector component. this needs a bit of short simple procedural code that reaches out into its parent div and stores id and parent div and stores content in idToInnerHtml map. if components flicker on page load then error. that defeats purpose of SSR. when you get this error, fix it properly. no shortcuts.
+- start clickhouse server along with it
+- ingest events
+- each event own table
+- user selects index columns
+- always use real css. never use inline css or any related retarded bs
+-
